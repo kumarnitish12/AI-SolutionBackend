@@ -2,8 +2,11 @@ export interface CollegeListItem {
   id: number;
   name: string;
   location: string;
-  fees: number;
+  feesRange: string;
   rating: number;
+  ranking: string;
+  examsAccepted: string[];
+  placementPercentage: number | null;
 }
 
 export interface CollegeDetails extends CollegeListItem {

@@ -1,21 +1,22 @@
 import { Router } from "express";
 import { z } from "zod";
-import { compareColleges, getCollegeById, getColleges } from "../services/collegeService";
+import { compareColleges, getCollegeById, getCollegeFacets, getColleges } from "../services/collegeService";
 
-const querySchema = z.object({
+export const querySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(10),
   search: z.string().trim().optional(),
   location: z.string().trim().optional(),
-  minFees: z.coerce.number().int().nonnegative().optional(),
-  maxFees: z.coerce.number().int().nonnegative().optional()
+  maxFees: z.coerce.number().int().nonnegative().optional(),
+  minRating: z.coerce.number().min(0).max(5).optional(),
+  interest: z.string().trim().optional()
 });
 
-const idSchema = z.object({
+export const idSchema = z.object({
   id: z.coerce.number().int().min(1)
 });
 
-const compareSchema = z.object({
+export const compareSchema = z.object({
   collegeIds: z.array(z.number().int().min(1)).min(2).max(3)
 });
 
@@ -26,6 +27,15 @@ collegeRouter.get("/", async (req, res, next) => {
     const parsed = querySchema.parse(req.query);
     const result = await getColleges(parsed);
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+collegeRouter.get("/facets", async (_req, res, next) => {
+  try {
+    const data = await getCollegeFacets();
+    res.json(data);
   } catch (error) {
     next(error);
   }

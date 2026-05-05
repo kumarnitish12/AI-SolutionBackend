@@ -6,8 +6,14 @@ interface CollegeQueryInput {
   limit: number;
   search?: string;
   location?: string;
-  minFees?: number;
   maxFees?: number;
+  minRating?: number;
+  interest?: string;
+}
+
+export interface CollegeFacets {
+  locations: string[];
+  interests: string[];
 }
 
 export async function getColleges(input: CollegeQueryInput) {
@@ -25,14 +31,19 @@ export async function getColleges(input: CollegeQueryInput) {
     whereClauses.push(`c.location = $${values.length}`);
   }
 
-  if (typeof input.minFees === "number") {
-    values.push(input.minFees);
-    whereClauses.push(`c.fees >= $${values.length}`);
-  }
-
   if (typeof input.maxFees === "number") {
     values.push(input.maxFees);
     whereClauses.push(`c.fees <= $${values.length}`);
+  }
+
+  if (typeof input.minRating === "number") {
+    values.push(input.minRating);
+    whereClauses.push(`c.rating >= $${values.length}`);
+  }
+
+  if (input.interest) {
+    values.push(input.interest.toLowerCase());
+    whereClauses.push(`c.tags @> ARRAY[$${values.length}]::text[]`);
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -45,8 +56,25 @@ export async function getColleges(input: CollegeQueryInput) {
 
   const listValues = [...values, input.limit, offset];
   const listQuery = `
-    SELECT c.id, c.name, c.location, c.fees, c.rating
+    SELECT
+      c.id,
+      c.name,
+      c.location,
+      CONCAT('Rs ', TO_CHAR(c.fees, 'FM9,99,99,999'), ' / year') AS "feesRange",
+      c.rating,
+      CASE c.rank_band
+        WHEN 'elite' THEN 'Top Tier'
+        WHEN 'strong' THEN 'High'
+        WHEN 'moderate' THEN 'Moderate'
+        ELSE 'Emerging'
+      END AS ranking,
+      CASE
+        WHEN c.tags IS NULL THEN ARRAY[]::text[]
+        ELSE c.tags
+      END AS "examsAccepted",
+      p.placement_percentage AS "placementPercentage"
     FROM colleges c
+    LEFT JOIN placements p ON p.college_id = c.id
     ${whereSql}
     ORDER BY c.rating DESC, c.name ASC
     LIMIT $${listValues.length - 1}
@@ -69,8 +97,26 @@ export async function getColleges(input: CollegeQueryInput) {
 export async function getCollegeById(id: number): Promise<CollegeDetails | null> {
   const collegeResult = await pool.query(
     `
-      SELECT id, name, location, fees, rating, overview
-      FROM colleges
+      SELECT
+        c.id,
+        c.name,
+        c.location,
+        CONCAT('Rs ', TO_CHAR(c.fees, 'FM9,99,99,999'), ' / year') AS "feesRange",
+        c.rating,
+        CASE c.rank_band
+          WHEN 'elite' THEN 'Top Tier'
+          WHEN 'strong' THEN 'High'
+          WHEN 'moderate' THEN 'Moderate'
+          ELSE 'Emerging'
+        END AS ranking,
+        CASE
+          WHEN c.tags IS NULL THEN ARRAY[]::text[]
+          ELSE c.tags
+        END AS "examsAccepted",
+        p.placement_percentage AS "placementPercentage",
+        c.overview
+      FROM colleges c
+      LEFT JOIN placements p ON p.college_id = c.id
       WHERE id = $1
     `,
     [id]
@@ -110,7 +156,13 @@ export async function getCollegeById(id: number): Promise<CollegeDetails | null>
 
 export async function compareColleges(collegeIds: number[]) {
   const query = `
-    SELECT c.id, c.name, c.location, c.fees, c.rating, p.placement_percentage
+    SELECT
+      c.id,
+      c.name,
+      c.location,
+      CONCAT('Rs ', TO_CHAR(c.fees, 'FM9,99,99,999'), ' / year') AS "feesRange",
+      c.rating,
+      p.placement_percentage AS "placementPercentage"
     FROM colleges c
     LEFT JOIN placements p ON p.college_id = c.id
     WHERE c.id = ANY($1::int[])
@@ -119,4 +171,30 @@ export async function compareColleges(collegeIds: number[]) {
 
   const result = await pool.query(query, [collegeIds]);
   return result.rows;
+}
+
+export async function getCollegeFacets(): Promise<CollegeFacets> {
+  const [locationsResult, interestsResult] = await Promise.all([
+    pool.query<{ location: string }>(
+      `
+      SELECT DISTINCT location
+      FROM colleges
+      WHERE location IS NOT NULL AND location <> ''
+      ORDER BY location ASC
+      `
+    ),
+    pool.query<{ interest: string }>(
+      `
+      SELECT DISTINCT UNNEST(tags) AS interest
+      FROM colleges
+      WHERE tags IS NOT NULL
+      ORDER BY interest ASC
+      `
+    )
+  ]);
+
+  return {
+    locations: locationsResult.rows.map((row) => row.location),
+    interests: interestsResult.rows.map((row) => row.interest)
+  };
 }
